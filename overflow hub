@@ -1,0 +1,249 @@
+--!strict
+-- Project Slayers - Fly Script with Menu (Toggle UI: P | Toggle Fly: X)
+
+local env = _G :: any
+
+local game = env.game
+local Enum = env.Enum
+local Instance = env.Instance
+local Vector3 = env.Vector3
+local Color3 = env.Color3
+local UDim2 = env.UDim2
+local UDim = env.UDim
+
+if not game then
+	warn("Running without Roblox environment; using mock services.")
+	local mock = {}
+	function mock.GetService(name) return {} end
+	game = mock
+end
+
+local Workspace = game:GetService("Workspace")
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local CoreGui = game:GetService("CoreGui")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
+
+-- Executor environment or fallback
+local getgenvFn = env.getgenv
+local genv: any = if type(getgenvFn) == "function" then (getgenvFn :: () -> any)() else _G
+genv.FlySpeed = genv.FlySpeed or 60
+genv.Flying = false
+
+local bodyVelocity: any = nil
+local bodyGyro: any = nil
+local renderConn: any = nil
+local toggleButton: any = nil
+
+local function getRoot(): any
+	local char = LocalPlayer.Character
+	if not char then return nil end
+	return char:FindFirstChild("HumanoidRootPart")
+end
+
+local function stopFly()
+	genv.Flying = false
+	if toggleButton then
+		toggleButton.Text = "Fly: OFF"
+		toggleButton.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
+	end
+
+	if renderConn then
+		renderConn:Disconnect()
+		renderConn = nil
+	end
+	if bodyVelocity then
+		bodyVelocity:Destroy()
+		bodyVelocity = nil
+	end
+	if bodyGyro then
+		bodyGyro:Destroy()
+		bodyGyro = nil
+	end
+
+	local char = LocalPlayer.Character
+	if char then
+		local humanoid = char:FindFirstChildOfClass("Humanoid")
+		if humanoid then
+			humanoid.PlatformStand = false
+		end
+	end
+end
+
+local function startFly()
+	local root = getRoot()
+	if not root then return end
+
+	stopFly()
+	genv.Flying = true
+
+	if toggleButton then
+		toggleButton.Text = "Fly: ON"
+		toggleButton.BackgroundColor3 = Color3.fromRGB(45, 175, 80)
+	end
+
+	bodyVelocity = Instance.new("BodyVelocity")
+	bodyVelocity.MaxForce = Vector3.new(1e9, 1e9, 1e9)
+	bodyVelocity.Velocity = Vector3.zero
+	bodyVelocity.Parent = root
+
+	bodyGyro = Instance.new("BodyGyro")
+	bodyGyro.MaxTorque = Vector3.new(1e9, 1e9, 1e9)
+	bodyGyro.P = 9e4
+	bodyGyro.CFrame = root.CFrame
+	bodyGyro.Parent = root
+
+	renderConn = RunService.RenderStepped:Connect(function()
+		if not genv.Flying or not bodyVelocity or not bodyGyro then
+			stopFly()
+			return
+		end
+
+		local currentRoot = getRoot()
+		if not currentRoot or currentRoot ~= root then
+			stopFly()
+			return
+		end
+
+		local char = LocalPlayer.Character
+		if char then
+			local humanoid = char:FindFirstChildOfClass("Humanoid")
+			if humanoid then
+				humanoid.PlatformStand = true
+			end
+		end
+
+		local camCF = Camera.CFrame
+		bodyGyro.CFrame = camCF
+
+		local moveDir = Vector3.zero
+		if UserInputService:IsKeyDown(Enum.KeyCode.W) then
+			moveDir += camCF.LookVector
+		end
+		if UserInputService:IsKeyDown(Enum.KeyCode.S) then
+			moveDir -= camCF.LookVector
+		end
+		if UserInputService:IsKeyDown(Enum.KeyCode.A) then
+			moveDir -= camCF.RightVector
+		end
+		if UserInputService:IsKeyDown(Enum.KeyCode.D) then
+			moveDir += camCF.RightVector
+		end
+		if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
+			moveDir += Vector3.new(0, 1, 0)
+		end
+		if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then
+			moveDir -= Vector3.new(0, 1, 0)
+		end
+
+		local speed = tonumber(genv.FlySpeed) or 60
+		if moveDir.Magnitude > 0 then
+			bodyVelocity.Velocity = moveDir.Unit * speed
+		else
+			bodyVelocity.Velocity = Vector3.zero
+		end
+	end)
+end
+
+local function toggleFly()
+	if genv.Flying then
+		stopFly()
+	else
+		startFly()
+	end
+end
+
+-- ================= GUI CREATION =================
+local function buildGui()
+	local existing = CoreGui:FindFirstChild("PS_FlyMenu")
+	if existing then
+		existing:Destroy()
+	end
+
+	local screenGui = Instance.new("ScreenGui")
+	screenGui.Name = "PS_FlyMenu"
+	screenGui.ResetOnSpawn = false
+
+	-- Safe UI parent for executors
+	local gethuiFn = env.gethui
+	local parentTarget = if type(gethuiFn) == "function" then (gethuiFn :: () -> any)() else CoreGui
+	screenGui.Parent = parentTarget
+
+	local mainFrame = Instance.new("Frame")
+	mainFrame.Name = "MainFrame"
+	mainFrame.Size = UDim2.new(0, 220, 0, 150)
+	mainFrame.Position = UDim2.new(0.05, 0, 0.4, 0)
+	mainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+	mainFrame.BorderSizePixel = 0
+	mainFrame.Active = true
+	mainFrame.Draggable = true
+	mainFrame.Parent = screenGui
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 8)
+	corner.Parent = mainFrame
+
+	local title = Instance.new("TextLabel")
+	title.Size = UDim2.new(1, 0, 0, 32)
+	title.BackgroundTransparency = 1
+	title.Text = "Fly Menu (P to Hide)"
+	title.TextColor3 = Color3.fromRGB(240, 240, 240)
+	title.TextSize = 14
+	title.Font = Enum.Font.GothamBold
+	title.Parent = mainFrame
+
+	toggleButton = Instance.new("TextButton")
+	toggleButton.Size = UDim2.new(0.85, 0, 0, 34)
+	toggleButton.Position = UDim2.new(0.075, 0, 0.28, 0)
+	toggleButton.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
+	toggleButton.Text = "Fly: OFF"
+	toggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+	toggleButton.TextSize = 14
+	toggleButton.Font = Enum.Font.GothamSemibold
+	toggleButton.Parent = mainFrame
+
+	local btnCorner = Instance.new("UICorner")
+	btnCorner.CornerRadius = UDim.new(0, 6)
+	btnCorner.Parent = toggleButton
+
+	toggleButton.MouseButton1Click:Connect(toggleFly)
+
+	local speedBox = Instance.new("TextBox")
+	speedBox.Size = UDim2.new(0.85, 0, 0, 32)
+	speedBox.Position = UDim2.new(0.075, 0, 0.62, 0)
+	speedBox.BackgroundColor3 = Color3.fromRGB(40, 40, 48)
+	speedBox.PlaceholderText = "Speed (Default: 60)"
+	speedBox.Text = tostring(genv.FlySpeed)
+	speedBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+	speedBox.TextSize = 13
+	speedBox.Font = Enum.Font.Gotham
+	speedBox.Parent = mainFrame
+
+	local boxCorner = Instance.new("UICorner")
+	boxCorner.CornerRadius = UDim.new(0, 6)
+	boxCorner.Parent = speedBox
+
+	speedBox.FocusLost:Connect(function()
+		local num = tonumber(speedBox.Text)
+		if num and num > 0 then
+			genv.FlySpeed = num
+		else
+			speedBox.Text = tostring(genv.FlySpeed)
+		end
+	end)
+
+	UserInputService.InputBegan:Connect(function(input, processed)
+		if processed then return end
+		if input.KeyCode == Enum.KeyCode.P then
+			mainFrame.Visible = not mainFrame.Visible
+		elseif input.KeyCode == Enum.KeyCode.X then
+			toggleFly()
+		end
+	end)
+end
+
+buildGui()
+print("[Project Slayers] Fly & Menu loaded! Press 'P' for UI, 'X' to fly.")
